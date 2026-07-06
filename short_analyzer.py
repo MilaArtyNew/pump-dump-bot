@@ -31,7 +31,7 @@ def _score_rsi(rsi: Optional[float]) -> tuple[str, str, float]:
     if rsi is None:
         return "RSI 1H н/д", "▫️", 0.0
     r = round(rsi)
-    if r >= 65:
+    if r >= 70:
         return f"RSI 1H {r} — перекуплен, откат вероятен", "✅", 1.0
     if r < 40:
         return f"RSI 1H {r} — низкий, памп без перегрева", "❌", -1.0
@@ -44,9 +44,9 @@ def _score_rsi_4h(rsi_4h: Optional[float]) -> tuple[str, str, float]:
     if rsi_4h is None:
         return "", "▫️", 0.0
     r = round(rsi_4h)
-    if r >= 60:
+    if r >= 70:
         return f"RSI 4H {r} — подтверждает перекупленность", "✅", 0.5
-    if r < 35:
+    if r < 50:
         return f"RSI 4H {r} — слабость на 4H, риск продолжения", "⚠️", -0.5
     return "", "▫️", 0.0
 
@@ -326,17 +326,8 @@ def format_short_analysis(
         total += arb_score
 
     # Resistance check for ВХОД threshold
-    # EMA + real price level: threshold 2.0
-    # ATH overhead supply only: threshold 2.5
-    # No resistance at all: threshold 2.5 (lowered from 3.0 — EMA alone can reach 2.0)
-    ath_is_resistance = 0 < ath_x < 2.0
     has_real_resistance = resistance_info is not None or resistance_1h_info is not None or ema_info is not None
-    has_resistance = has_real_resistance or ath_is_resistance
-    entry_threshold = (
-        2.5 if not has_resistance
-        else 2.5 if not has_real_resistance
-        else 2.0
-    )
+    entry_threshold = 2.0
 
     # Wait mode: large negative funding about to be charged
     fund_pct = funding * 100 if funding is not None else 0.0
@@ -348,6 +339,9 @@ def format_short_analysis(
 
     # Hard block: 1h cooldown after SL on this coin
     cooldown_block = stop_cooldown_mins > 0
+
+    # Soft block: no EMA or static resistance confirmed → max СЛАБЫЙ
+    no_level_block = not has_real_resistance
 
     if wait_mode:
         v_emoji, v_label = "🕒", "ПОДОЖДАТЬ — скоро начисление фандинга"
@@ -361,6 +355,8 @@ def format_short_analysis(
         v_emoji, v_label = "🔴", "ПРОПУСК — арбитражный памп, закрытие спреда с Binance"
     elif cooldown_block:
         v_emoji, v_label = "🔴", f"ПРОПУСК — кулдаун 1ч после стопа, осталось ~{stop_cooldown_mins} мин"
+    elif no_level_block:
+        v_emoji, v_label = "🟡", "СЛАБЫЙ — нет подтверждённого уровня (EMA / сопротивление)"
     else:
         v_emoji, v_label = _verdict(total, entry_threshold)
 
@@ -375,7 +371,7 @@ def format_short_analysis(
         msg_lines.append(f"{icon} {label}")
 
     hard_block = wait_mode or arb_block or cooldown_block
-    has_real_entry = not hard_block and total >= entry_threshold
+    has_real_entry = not hard_block and not no_level_block and total >= entry_threshold
     if has_real_entry:
         sl = current_price * 1.03
         tp = current_price * 0.95
@@ -383,7 +379,7 @@ def format_short_analysis(
             "",
             f"🎯 Вход (шорт) около {_fmt_price(current_price)}",
             f"⛔ Стоп-лосс {_fmt_price(sl)} (+3%)",
-            f"✅ Цель: 50% на {_fmt_price(tp)} (−5%), стоп в безубыток, остаток трейлингом",
+            f"✅ Цель: 100% позиции на {_fmt_price(tp)} (−5%)",
         ])
 
     if wait_mode:
