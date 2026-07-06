@@ -132,7 +132,8 @@ class PumpScanner:
                 if sym not in self._price_history:
                     self._price_history[sym] = deque()
                 hist = self._price_history[sym]
-                for k in klines:
+                # BingX v3 returns descending — sort ascending for correct chronological order
+                for k in sorted(klines, key=lambda k: int(k.get("time", 0))):
                     try:
                         ts = int(k["time"])
                         px = float(k["close"])
@@ -479,10 +480,10 @@ class PumpScanner:
             return None
 
     async def _get_rsi(self, symbol: str, interval: str, current_price: Optional[float] = None) -> Optional[float]:
-        """RSI. For 1h: pass current_price to include the live pump in the calculation.
+        """RSI. BingX v3 klines are descending (newest first) — sort ascending before computing.
 
-        If BingX already includes the current (unclosed) candle in klines, skip append
-        to avoid inflating RSI by counting the pump candle twice.
+        Optionally appends current_price as the latest candle if the in-progress candle
+        is not already included (last closed candle is from a previous period).
         1h uses limit=50 (~2 days) for recency; 4h/1d use 100 for stability.
         """
         limit = 50 if interval == "1h" else 100
@@ -490,12 +491,14 @@ class PumpScanner:
         if not klines:
             return None
         try:
-            closes = [float(k["close"]) for k in klines]
+            # BingX v3 returns descending order — sort ascending (oldest→newest) for correct RSI
+            klines_asc = sorted(klines, key=lambda k: int(k.get("time", 0)))
+            closes = [float(k["close"]) for k in klines_asc]
             if current_price is not None:
                 interval_ms = {"1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}.get(interval, 0)
                 if interval_ms:
                     now_period_start = (int(time.time() * 1000) // interval_ms) * interval_ms
-                    last_kline_time = int(klines[-1].get("time", 0))
+                    last_kline_time = int(klines_asc[-1].get("time", 0))
                     if last_kline_time < now_period_start:
                         closes.append(current_price)
                 else:
