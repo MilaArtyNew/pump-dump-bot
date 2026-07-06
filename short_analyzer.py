@@ -181,12 +181,13 @@ def _score_resistance(
 
 
 def _score_ema(ema_info: Optional[tuple]) -> tuple[Optional[str], Optional[str], float]:
-    """50 EMA on 4H above current price = dynamic resistance (ключевая средняя)."""
+    """EMA above current price = dynamic resistance. Supports 4H EMA50 and 1D EMA20."""
     if ema_info is None:
         return None, None, 0.0
-    ema, pct_above = ema_info
+    ema, pct_above = ema_info[0], ema_info[1]
+    label = ema_info[2] if len(ema_info) > 2 else "50 EMA 4H"
     return (
-        f"Ключевая средняя 50 EMA 4H: {_fmt_price(ema)} (+{pct_above:.1f}%) — динамическое сопр.",
+        f"Ключевая средняя {label}: {_fmt_price(ema)} (+{pct_above:.1f}%) — динамическое сопр.",
         "✅", 1.0,
     )
 

@@ -26,6 +26,21 @@ from tracker import SignalTracker
 
 logger = logging.getLogger(__name__)
 
+
+def _best_ema(
+    ema_4h: Optional[tuple],
+    ema_1d: Optional[tuple],
+) -> Optional[tuple]:
+    """Return whichever EMA is closer to current price (smaller pct_above)."""
+    if ema_4h is None and ema_1d is None:
+        return None
+    if ema_4h is None:
+        return ema_1d
+    if ema_1d is None:
+        return ema_4h
+    return ema_4h if ema_4h[1] <= ema_1d[1] else ema_1d
+
+
 ROLL_WINDOW_MS    = 30 * 60 * 1000   # lookback: compare current price to price 30 min ago
 ROLL_MAX_AGE_MS   = 65 * 60 * 1000   # keep price history up to 65 min (need 60-min lookback)
 ROLL_LOOKBACK_60_MS = 60 * 60 * 1000  # for "return to level" check: price 60 min ago
@@ -271,7 +286,7 @@ class PumpScanner:
         vol_24h: float = 0.0,
         price_60min_ago: Optional[float] = None,
     ):
-        rsi_1h, rsi_4h, rsi_1d, funding, ath_x, vol_mult, btc_6h, resistance_info, resistance_1h_info, ema_info, oi_usd, binance_price = (
+        rsi_1h, rsi_4h, rsi_1d, funding, ath_x, vol_mult, btc_6h, resistance_info, resistance_1h_info, ema_4h_info, ema_1d_info, oi_usd, binance_price = (
             await asyncio.gather(
                 self._get_rsi(symbol, "1h", current_price=close_p),
                 self._get_rsi(symbol, "4h", current_price=close_p),
@@ -283,6 +298,7 @@ class PumpScanner:
                 self._find_resistance(symbol, close_p, "4h"),
                 self._find_resistance(symbol, close_p, "1h"),
                 self._get_ema_resistance(symbol, close_p),
+                self._get_ema_1d_resistance(symbol, close_p),
                 self._get_oi_usd(symbol, close_p),
                 self._get_binance_price(symbol),
                 return_exceptions=True,
@@ -298,7 +314,10 @@ class PumpScanner:
         btc_6h = btc_6h if isinstance(btc_6h, float) else None
         resistance_info = resistance_info if isinstance(resistance_info, tuple) else None
         resistance_1h_info = resistance_1h_info if isinstance(resistance_1h_info, tuple) else None
-        ema_info = ema_info if isinstance(ema_info, tuple) else None
+        ema_4h_info = ema_4h_info if isinstance(ema_4h_info, tuple) else None
+        ema_1d_info = ema_1d_info if isinstance(ema_1d_info, tuple) else None
+        # Pick EMA closest to price (smaller pct_above wins)
+        ema_info = _best_ema(ema_4h_info, ema_1d_info)
         oi_usd = oi_usd if isinstance(oi_usd, float) else None
         binance_price = binance_price if isinstance(binance_price, float) else None
 
@@ -532,16 +551,17 @@ class PumpScanner:
 
         return None
 
-    async def _get_ema_resistance(self, symbol: str, current_price: float) -> Optional[tuple[float, float]]:
+    async def _get_ema_resistance(self, symbol: str, current_price: float) -> Optional[tuple[float, float, str]]:
         """Check if 50 EMA on 4H is within 20% above current price (dynamic resistance).
 
-        Returns (ema_value, pct_above) or None.
+        Returns (ema_value, pct_above, label) or None.
         """
         klines = await self.api.get_klines(symbol, "4h", limit=60)
         if not klines or current_price <= 0:
             return None
         try:
-            closes = [float(k["close"]) for k in klines]
+            klines_asc = sorted(klines, key=lambda k: int(k.get("time", 0)))
+            closes = [float(k["close"]) for k in klines_asc]
             if len(closes) < 50:
                 return None
             k_factor = 2 / (50 + 1)
@@ -553,7 +573,33 @@ class PumpScanner:
             pct_above = (ema - current_price) / current_price * 100
             if pct_above > 20.0:
                 return None
-            return ema, pct_above
+            return ema, pct_above, "50 EMA 4H"
+        except Exception:
+            return None
+
+    async def _get_ema_1d_resistance(self, symbol: str, current_price: float) -> Optional[tuple[float, float, str]]:
+        """Check if 20 EMA on 1D is within 20% above current price (daily dynamic resistance).
+
+        Returns (ema_value, pct_above, label) or None.
+        """
+        klines = await self.api.get_klines(symbol, "1d", limit=30)
+        if not klines or current_price <= 0:
+            return None
+        try:
+            klines_asc = sorted(klines, key=lambda k: int(k.get("time", 0)))
+            closes = [float(k["close"]) for k in klines_asc]
+            if len(closes) < 20:
+                return None
+            k_factor = 2 / (20 + 1)
+            ema = closes[0]
+            for c in closes[1:]:
+                ema = c * k_factor + ema * (1 - k_factor)
+            if ema <= current_price:
+                return None
+            pct_above = (ema - current_price) / current_price * 100
+            if pct_above > 20.0:
+                return None
+            return ema, pct_above, "20 EMA 1D"
         except Exception:
             return None
 
@@ -716,12 +762,13 @@ class PumpScanner:
         vol_24h = self._last_vol.get(sym, 0)
         coin = sym.replace("-USDT", "").replace("-USDC", "")
 
-        funding, ath_x, btc_6h, resistance_1h, ema_info, oi_usd, binance_price, rsi_4h = await asyncio.gather(
+        funding, ath_x, btc_6h, resistance_1h, ema_4h_info, ema_1d_info, oi_usd, binance_price, rsi_4h = await asyncio.gather(
             self.api.get_funding_rate(sym),
             self._get_ath_x(sym, current_price),
             self._get_btc_6h_change(),
             self._find_resistance(sym, current_price, "1h"),
             self._get_ema_resistance(sym, current_price),
+            self._get_ema_1d_resistance(sym, current_price),
             self._get_oi_usd(sym, current_price),
             self._get_binance_price(sym),
             self._get_rsi(sym, "4h", current_price=current_price),
@@ -731,7 +778,9 @@ class PumpScanner:
         ath_x = ath_x if isinstance(ath_x, float) else 0.0
         btc_6h = btc_6h if isinstance(btc_6h, float) else None
         resistance_1h = resistance_1h if isinstance(resistance_1h, tuple) else None
-        ema_info = ema_info if isinstance(ema_info, tuple) else None
+        ema_4h_info = ema_4h_info if isinstance(ema_4h_info, tuple) else None
+        ema_1d_info = ema_1d_info if isinstance(ema_1d_info, tuple) else None
+        ema_info = _best_ema(ema_4h_info, ema_1d_info)
         oi_usd = oi_usd if isinstance(oi_usd, float) else None
         binance_price = binance_price if isinstance(binance_price, float) else None
         rsi_4h = rsi_4h if isinstance(rsi_4h, float) else None
