@@ -578,28 +578,32 @@ class PumpScanner:
             return None
 
     async def _get_ema_1d_resistance(self, symbol: str, current_price: float) -> Optional[tuple[float, float, str]]:
-        """Check if 20 EMA on 1D is within 20% above current price (daily dynamic resistance).
+        """Check 1D EMA20/50/100/200 — pick the closest one above current price (within 20%).
 
         Returns (ema_value, pct_above, label) or None.
         """
-        klines = await self.api.get_klines(symbol, "1d", limit=30)
+        klines = await self.api.get_klines(symbol, "1d", limit=210)
         if not klines or current_price <= 0:
             return None
         try:
             klines_asc = sorted(klines, key=lambda k: int(k.get("time", 0)))
             closes = [float(k["close"]) for k in klines_asc]
-            if len(closes) < 20:
-                return None
-            k_factor = 2 / (20 + 1)
-            ema = closes[0]
-            for c in closes[1:]:
-                ema = c * k_factor + ema * (1 - k_factor)
-            if ema <= current_price:
-                return None
-            pct_above = (ema - current_price) / current_price * 100
-            if pct_above > 20.0:
-                return None
-            return ema, pct_above, "20 EMA 1D"
+            best: Optional[tuple[float, float, str]] = None
+            for period, label in ((20, "20 EMA 1D"), (50, "50 EMA 1D"), (100, "100 EMA 1D"), (200, "200 EMA 1D")):
+                if len(closes) < period:
+                    continue
+                k_factor = 2 / (period + 1)
+                ema = closes[0]
+                for c in closes[1:]:
+                    ema = c * k_factor + ema * (1 - k_factor)
+                if ema <= current_price:
+                    continue
+                pct_above = (ema - current_price) / current_price * 100
+                if pct_above > 20.0:
+                    continue
+                if best is None or pct_above < best[1]:
+                    best = (ema, pct_above, label)
+            return best
         except Exception:
             return None
 
