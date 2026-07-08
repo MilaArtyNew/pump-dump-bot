@@ -571,7 +571,7 @@ class PumpScanner:
             if ema <= current_price:
                 return None
             pct_above = (ema - current_price) / current_price * 100
-            if pct_above > 20.0:
+            if pct_above > 15.0:
                 return None
             return ema, pct_above, "50 EMA 4H"
         except Exception:
@@ -599,7 +599,7 @@ class PumpScanner:
                 if ema <= current_price:
                     continue
                 pct_above = (ema - current_price) / current_price * 100
-                if pct_above > 20.0:
+                if pct_above > 15.0:
                     continue
                 if best is None or pct_above < best[1]:
                     best = (ema, pct_above, label)

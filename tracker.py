@@ -91,7 +91,7 @@ class SignalTracker:
         self._active[symbol] = ActivePosition(
             symbol=symbol,
             entry_price=entry_price,
-            sl_price=entry_price * 1.03,
+            sl_price=entry_price * 1.05,
             tp_price=entry_price * 0.95,
             candle_time=candle_time,
             verdict=verdict,

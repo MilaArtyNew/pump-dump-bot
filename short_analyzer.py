@@ -326,8 +326,11 @@ def format_short_analysis(
         criteria.append((arb_icon, arb_label))
         total += arb_score
 
-    # Resistance check for ВХОД threshold
-    has_real_resistance = resistance_info is not None or resistance_1h_info is not None or ema_info is not None
+    # Resistance check for ВХОД threshold — only мощный levels (drop ≥ 20%) count
+    def _is_strong(info: Optional[tuple]) -> bool:
+        return info is not None and info[2] >= 20.0
+
+    has_real_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info) or ema_info is not None
     entry_threshold = 2.0
 
     # Wait mode: large negative funding about to be charged
@@ -374,12 +377,12 @@ def format_short_analysis(
     hard_block = wait_mode or arb_block or cooldown_block
     has_real_entry = not hard_block and not no_level_block and total >= entry_threshold
     if has_real_entry:
-        sl = current_price * 1.03
+        sl = current_price * 1.05
         tp = current_price * 0.95
         msg_lines.extend([
             "",
             f"🎯 Вход (шорт) около {_fmt_price(current_price)}",
-            f"⛔ Стоп-лосс {_fmt_price(sl)} (+3%)",
+            f"⛔ Стоп-лосс {_fmt_price(sl)} (+5%)",
             f"✅ Цель: 100% позиции на {_fmt_price(tp)} (−5%)",
         ])
 
