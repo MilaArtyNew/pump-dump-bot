@@ -191,14 +191,21 @@ def _score_resistance(
 
 
 def _score_ema(ema_info: Optional[tuple]) -> tuple[Optional[str], Optional[str], float]:
-    """EMA above current price = dynamic resistance. Supports 4H EMA50 and 1D EMA20."""
+    """EMA above current price = dynamic resistance, only within SL distance (≤5%).
+    EMA beyond SL price is informational only — price hits SL before reaching the EMA.
+    """
     if ema_info is None:
         return None, None, 0.0
     ema, pct_above = ema_info[0], ema_info[1]
     label = ema_info[2] if len(ema_info) > 2 else "50 EMA 4H"
+    if pct_above < _SL_PCT:
+        return (
+            f"Ключевая средняя {label}: {_fmt_price(ema)} (+{pct_above:.1f}%) — динамическое сопр.",
+            "✅", 1.0,
+        )
     return (
-        f"Ключевая средняя {label}: {_fmt_price(ema)} (+{pct_above:.1f}%) — динамическое сопр.",
-        "✅", 1.0,
+        f"Ключевая средняя {label}: {_fmt_price(ema)} (+{pct_above:.1f}%) — выше СЛ, ориентир",
+        "▫️", 0.0,
     )
 
 
@@ -341,7 +348,7 @@ def format_short_analysis(
     def _is_strong(info: Optional[tuple]) -> bool:
         return info is not None and info[2] >= 20.0 and info[1] < _SL_PCT
 
-    has_real_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info) or ema_info is not None
+    has_real_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info) or (ema_info is not None and ema_info[1] < _SL_PCT)
     entry_threshold = 2.0
 
     # Wait mode: large negative funding about to be charged
