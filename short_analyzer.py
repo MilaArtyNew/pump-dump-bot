@@ -349,11 +349,19 @@ def format_short_analysis(
         return info is not None and info[2] >= 20.0 and info[1] < _SL_PCT
 
     has_ema = ema_info is not None and ema_info[1] < _SL_PCT
+
+    def _resistance_qualifies(info: Optional[tuple]) -> bool:
+        """Return True if this resistance level unlocks ВХОД.
+        Very close resistance (<2%): price is already at the wall — short-term reaction
+        is likely regardless of 4H trend direction. No RSI 4H requirement.
+        Farther resistance (2–5%): 4H trend may continue before reversing, so RSI 4H ≥70 required.
+        """
+        if not _is_strong(info):
+            return False
+        return info[1] < 2.0 or (rsi_4h is not None and rsi_4h >= 70)
+
     has_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info)
-    # Historical resistance alone only qualifies when 4H is also overbought (≥70).
-    # If 4H trend is not exhausted, price easily breaks through static levels.
-    # EMA (dynamic resistance) qualifies unconditionally within SL distance.
-    resistance_qualifies = has_resistance and (rsi_4h is not None and rsi_4h >= 70)
+    resistance_qualifies = _resistance_qualifies(resistance_info) or _resistance_qualifies(resistance_1h_info)
     has_real_resistance = has_ema or resistance_qualifies
     # Separate flag: resistance present but blocked by 4H RSI — for a clearer СЛАБЫЙ reason
     resistance_without_4h = has_resistance and not has_ema and not resistance_qualifies
