@@ -55,7 +55,7 @@ async def main():
     chat_id = os.environ["CHAT_ID"]
     min_pump = float(os.getenv("MIN_PUMP_PCT", "11.0"))
     interval = int(os.getenv("SCAN_INTERVAL", "30"))
-    min_volume = float(os.getenv("MIN_VOLUME_USDT", "1000000"))
+    min_volume = float(os.getenv("MIN_VOLUME_USDT", "800000"))
 
     _scanner = PumpScanner(
         telegram_token=token,

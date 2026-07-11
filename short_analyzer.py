@@ -348,7 +348,15 @@ def format_short_analysis(
     def _is_strong(info: Optional[tuple]) -> bool:
         return info is not None and info[2] >= 20.0 and info[1] < _SL_PCT
 
-    has_real_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info) or (ema_info is not None and ema_info[1] < _SL_PCT)
+    has_ema = ema_info is not None and ema_info[1] < _SL_PCT
+    has_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info)
+    # Historical resistance alone only qualifies when 4H is also overbought (≥70).
+    # If 4H trend is not exhausted, price easily breaks through static levels.
+    # EMA (dynamic resistance) qualifies unconditionally within SL distance.
+    resistance_qualifies = has_resistance and (rsi_4h is not None and rsi_4h >= 70)
+    has_real_resistance = has_ema or resistance_qualifies
+    # Separate flag: resistance present but blocked by 4H RSI — for a clearer СЛАБЫЙ reason
+    resistance_without_4h = has_resistance and not has_ema and not resistance_qualifies
     entry_threshold = 2.0
 
     # Wait mode: large negative funding about to be charged
@@ -377,6 +385,8 @@ def format_short_analysis(
         v_emoji, v_label = "🔴", "ПРОПУСК — арбитражный памп, закрытие спреда с Binance"
     elif cooldown_block:
         v_emoji, v_label = "🔴", f"ПРОПУСК — кулдаун 1ч после стопа, осталось ~{stop_cooldown_mins} мин"
+    elif resistance_without_4h:
+        v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень есть, но 4H не перекуплен (тренд не исчерпан)"
     elif no_level_block:
         v_emoji, v_label = "🟡", "СЛАБЫЙ — нет подтверждённого уровня (EMA / сопротивление)"
     else:
