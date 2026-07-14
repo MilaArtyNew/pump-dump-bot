@@ -352,19 +352,33 @@ def format_short_analysis(
 
     def _resistance_qualifies(info: Optional[tuple]) -> bool:
         """Return True if this resistance level unlocks ВХОД.
-        Very close resistance (<2%): price is already at the wall — short-term reaction
-        is likely regardless of 4H trend direction. No RSI 4H requirement.
-        Farther resistance (2–5%): 4H trend may continue before reversing, so RSI 4H ≥70 required.
+        Requires drop ≥20% and within SL (via _is_strong).
+        Blocks if resistance < 0.5%: pump inertia likely pushes through before reversing.
+        RSI 4H no longer required — level proximity alone is sufficient.
         """
         if not _is_strong(info):
             return False
-        return info[1] < 2.0 or (rsi_4h is not None and rsi_4h >= 70)
+        if info[1] < 0.5:  # too close: high overshoot risk, price arrives already at wall
+            return False
+        return True
 
     has_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info)
     resistance_qualifies = _resistance_qualifies(resistance_info) or _resistance_qualifies(resistance_1h_info)
     has_real_resistance = has_ema or resistance_qualifies
+    # Resistance present but too close to price (<0.5%) — overshoot risk, dedicated message
+    resistance_too_close = (
+        (resistance_info is not None and _is_strong(resistance_info) and resistance_info[1] < 0.5)
+        or (resistance_1h_info is not None and _is_strong(resistance_1h_info) and resistance_1h_info[1] < 0.5)
+    ) and not has_real_resistance
     # Separate flag: resistance present but blocked by 4H RSI — for a clearer СЛАБЫЙ reason
-    resistance_without_4h = has_resistance and not has_ema and not resistance_qualifies
+    resistance_without_4h = has_resistance and not has_ema and not resistance_qualifies and not resistance_too_close
+    # Level-based entry: close EMA/resistance + RSI 1H warm + fresh pump + not rocket coin
+    level_based_entry = (
+        has_real_resistance
+        and rsi_1h is not None and rsi_1h >= 50
+        and lvl_score >= 1.0   # fresh pump >10% in last hour
+        and signal_per_day <= 2
+    )
     entry_threshold = 2.0
 
     # Wait mode: large negative funding about to be charged
@@ -393,12 +407,17 @@ def format_short_analysis(
         v_emoji, v_label = "🔴", "ПРОПУСК — арбитражный памп, закрытие спреда с Binance"
     elif cooldown_block:
         v_emoji, v_label = "🔴", f"ПРОПУСК — кулдаун 1ч после стопа, осталось ~{stop_cooldown_mins} мин"
+    elif resistance_too_close:
+        v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень вплотную к цене (<0.5%), риск пробоя до СЛ"
     elif resistance_without_4h:
         v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень есть, но 4H не перекуплен (тренд не исчерпан)"
     elif no_level_block:
         v_emoji, v_label = "🟡", "СЛАБЫЙ — нет подтверждённого уровня (EMA / сопротивление)"
     else:
-        v_emoji, v_label = _verdict(total, entry_threshold)
+        if level_based_entry and total < entry_threshold:
+            v_emoji, v_label = "🟢", "ВХОД — уровень подтверждён, памп свежий"
+        else:
+            v_emoji, v_label = _verdict(total, entry_threshold)
 
     msg_lines = [
         title_override or f"{coin}/USDT · шорт после пампа +{pct:.2f}%",
@@ -411,7 +430,7 @@ def format_short_analysis(
         msg_lines.append(f"{icon} {label}")
 
     hard_block = wait_mode or arb_block or cooldown_block
-    has_real_entry = not hard_block and not no_level_block and total >= entry_threshold
+    has_real_entry = not hard_block and not no_level_block and (total >= entry_threshold or level_based_entry)
     if has_real_entry:
         sl = current_price * 1.05
         tp = current_price * 0.95
