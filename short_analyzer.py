@@ -379,6 +379,14 @@ def format_short_analysis(
         and lvl_score >= 1.0   # fresh pump >10% in last hour
         and signal_per_day <= 2
     )
+    # RSI-override entry: extreme overbought on both timeframes, first signal only
+    # Mirrors competitor behaviour: enters without nearby level when RSI 1H≥85 + 4H≥75
+    rsi_override_entry = (
+        rsi_1h is not None and rsi_1h >= 85
+        and rsi_4h is not None and rsi_4h >= 75
+        and signal_per_day == 1
+        and lvl_score >= 1.0   # fresh pump >10% in last hour
+    )
     entry_threshold = 2.0
 
     # Wait mode: large negative funding about to be charged
@@ -412,7 +420,10 @@ def format_short_analysis(
     elif resistance_without_4h:
         v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень есть, но 4H не перекуплен (тренд не исчерпан)"
     elif no_level_block:
-        v_emoji, v_label = "🟡", "СЛАБЫЙ — нет подтверждённого уровня (EMA / сопротивление)"
+        if rsi_override_entry:
+            v_emoji, v_label = "🟢", "ВХОД — RSI перегрет на 1H+4H, разворот без уровня"
+        else:
+            v_emoji, v_label = "🟡", "СЛАБЫЙ — нет подтверждённого уровня (EMA / сопротивление)"
     else:
         if level_based_entry and total < entry_threshold:
             v_emoji, v_label = "🟢", "ВХОД — уровень подтверждён, памп свежий"
@@ -430,7 +441,7 @@ def format_short_analysis(
         msg_lines.append(f"{icon} {label}")
 
     hard_block = wait_mode or arb_block or cooldown_block
-    has_real_entry = not hard_block and not no_level_block and (total >= entry_threshold or level_based_entry)
+    has_real_entry = not hard_block and (not no_level_block or rsi_override_entry) and (total >= entry_threshold or level_based_entry or rsi_override_entry)
     if has_real_entry:
         sl = current_price * 1.05
         tp = current_price * 0.95
