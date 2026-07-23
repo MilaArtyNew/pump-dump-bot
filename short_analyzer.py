@@ -166,16 +166,23 @@ _SL_PCT = 5.0  # SL distance % — resistance beyond this can't protect the posi
 
 
 def _score_resistance(
-    resistance_info: Optional[tuple], label: str = "4h"
+    resistance_info: Optional[tuple], label: str = "4h", vol_24h: float = 0
 ) -> tuple[Optional[str], Optional[str], float]:
     """Strong historical resistance within SL distance (≤5%) with ≥15% historical drop.
+    Drops 15-20% on low-liquidity coins (<$2M vol) are treated as moderate, not strong.
     Resistance above SL price is informational only — price hits SL before reaching it.
     """
     if resistance_info is None:
         return None, None, 0.0
     level, pct_above, drop_pct = resistance_info
     if drop_pct >= 15.0:
+        weak_drop = drop_pct < 20.0 and vol_24h < 2_000_000
         if pct_above < _SL_PCT:
+            if weak_drop:
+                return (
+                    f"Сопр. {label}: {_fmt_price(level)} (+{pct_above:.1f}%, обвал −{drop_pct:.0f}%) — умеренный уровень",
+                    "▫️", 0.0,
+                )
             return (
                 f"Сопр. {label}: {_fmt_price(level)} (+{pct_above:.1f}%, обвал −{drop_pct:.0f}%) — мощный уровень",
                 "✅", 1.0,
@@ -304,7 +311,7 @@ def format_short_analysis(
         total += lvl_score
 
     # Historical resistance (4h scores, 1h informational — skip if same level as 4h)
-    res_label, res_icon, res_score = _score_resistance(resistance_info, "4h")
+    res_label, res_icon, res_score = _score_resistance(resistance_info, "4h", vol_24h)
     # Very close resistance (<2%) is a stronger signal — price hits the wall immediately
     if resistance_info is not None and res_score > 0:
         _, pct_above_4h, _ = resistance_info
@@ -314,7 +321,7 @@ def format_short_analysis(
         criteria.append((res_icon, res_label))
         total += res_score
 
-    res_1h_label, res_1h_icon, res_1h_score = _score_resistance(resistance_1h_info, "1h")
+    res_1h_label, res_1h_icon, res_1h_score = _score_resistance(resistance_1h_info, "1h", vol_24h)
     if res_1h_icon:
         same_level = (
             resistance_info is not None
@@ -346,7 +353,11 @@ def format_short_analysis(
     # Resistance check for ВХОД threshold — мощный (drop ≥ 15%) AND within SL distance (<5%)
     # Resistance beyond SL can't protect the position: price hits SL before reaching the level
     def _is_strong(info: Optional[tuple]) -> bool:
-        return info is not None and info[2] >= 15.0 and info[1] < _SL_PCT
+        if info is None or info[2] < 15.0 or info[1] >= _SL_PCT:
+            return False
+        if info[2] < 20.0 and vol_24h < 2_000_000:
+            return False  # borderline drop on low-liquidity coin → unreliable level
+        return True
 
     has_ema = ema_info is not None and ema_info[1] < _SL_PCT
 
