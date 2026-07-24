@@ -432,9 +432,14 @@ class PumpScanner:
         # Close levels (≤5%): accept 10% historical drop — recent formation, less time to drop fully
         # Far levels (>5%): require 20% drop for proven strong resistance
         strong = [(lv, pa, dp) for lv, pa, dp in candidates if dp >= (10.0 if pa <= 5.0 else 20.0)]
-        if strong:
-            return min(strong, key=lambda x: x[1])
-        return None
+        if not strong:
+            return None
+        # Prefer мощный levels (drop ≥ 15%) over weak close levels (drop 10–14%).
+        # Without this, a weak close level would hide a stronger farther level that enables ВХОД.
+        very_strong = [(lv, pa, dp) for lv, pa, dp in strong if dp >= 15.0]
+        if very_strong:
+            return min(very_strong, key=lambda x: x[1])
+        return min(strong, key=lambda x: x[1])
 
     async def _get_oi_usd(self, symbol: str, current_price: float) -> Optional[float]:
         """Return open interest in USD (OI in coins × current price)."""

@@ -200,15 +200,17 @@ def _score_resistance(
 def _score_ema(ema_info: Optional[tuple]) -> tuple[Optional[str], Optional[str], float]:
     """EMA above current price = dynamic resistance, only within SL distance (≤5%).
     EMA beyond SL price is informational only — price hits SL before reaching the EMA.
+    Very close EMA (<2%) gets score 1.5 — price reaches it immediately, higher confidence.
     """
     if ema_info is None:
         return None, None, 0.0
     ema, pct_above = ema_info[0], ema_info[1]
     label = ema_info[2] if len(ema_info) > 2 else "50 EMA 4H"
     if pct_above < _SL_PCT:
+        score = 1.5 if pct_above < 2.0 else 1.0
         return (
             f"Ключевая средняя {label}: {_fmt_price(ema)} (+{pct_above:.1f}%) — динамическое сопр.",
-            "✅", 1.0,
+            "✅", score,
         )
     return (
         f"Ключевая средняя {label}: {_fmt_price(ema)} (+{pct_above:.1f}%) — выше СЛ, ориентир",
@@ -360,6 +362,7 @@ def format_short_analysis(
         return True
 
     has_ema = ema_info is not None and ema_info[1] < _SL_PCT
+    has_ema_very_close = ema_info is not None and ema_info[1] < 3.0  # EMA within 3% → lower RSI bar
 
     def _resistance_qualifies(info: Optional[tuple]) -> bool:
         """Return True if this resistance level unlocks ВХОД.
@@ -384,9 +387,11 @@ def format_short_analysis(
     # Separate flag: resistance present but blocked by 4H RSI — for a clearer СЛАБЫЙ reason
     resistance_without_4h = has_resistance and not has_ema and not resistance_qualifies and not resistance_too_close
     # Level-based entry: close EMA/resistance + RSI 1H warm + fresh pump + not rocket coin
+    # Very close EMA (<3%) lowers RSI bar from 50 to 45 — high-confidence resistance, less RSI needed
+    rsi_floor = 45 if has_ema_very_close else 50
     level_based_entry = (
         has_real_resistance
-        and rsi_1h is not None and rsi_1h >= 50
+        and rsi_1h is not None and rsi_1h >= rsi_floor
         and lvl_score >= 1.0   # fresh pump >10% in last hour
         and signal_per_day <= 2
     )
