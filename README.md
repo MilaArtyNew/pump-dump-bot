@@ -1,10 +1,12 @@
 # Pump Dump Bot
 
-A Telegram bot project for automating operational workflows and user commands.
+Signal bot for pump/dump and momentum conditions, using market data such as volume, price movement, open interest, funding, and exchange endpoints. It is designed for Binance/BingX-style trading surveillance rather than generic Telegram automation.
 
 ## Features
 
-- Telegram bot command handling and operational notifications.
+- Collects market data for pump/momentum signal detection.
+- Uses exchange metrics such as funding, open interest, volume, price, and tickers.
+- Can feed trading/execution workflows while keeping secrets outside the repository.
 
 ## Architecture
 
