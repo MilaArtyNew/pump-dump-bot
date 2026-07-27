@@ -368,12 +368,18 @@ class PumpScanner:
             logger.info(f"📋 {symbol} → ПРОПУСК (score={total:.1f}), не отправляем")
             self.tracker.register_position(symbol, close_p, candle_time, verdict=verdict, source="pump")
             return
-        await self._send_telegram(msg + "\n➖➖➖➖➖\n" + short_msg)
+        tg_ok = await self._send_telegram(msg + "\n➖➖➖➖➖\n" + short_msg)
 
         if not wait_mode:
             self.tracker.register_position(symbol, close_p, candle_time, verdict=verdict, source="pump")
 
         if has_real_entry and _TRADE_WEBHOOK_URL:
+            if not tg_ok:
+                coin = symbol.replace("-USDT", "")
+                logger.critical(f"⚠️ {symbol}: ВХОД-сигнал не дошёл в TG, но позиция откроется!")
+                asyncio.create_task(self._send_telegram(
+                    f"⚠️ {coin}/USDT — позиция открывается без уведомления (TG-сигнал не доставлен)"
+                ))
             asyncio.create_task(self._fire_trade_webhook(symbol, close_p))
 
     # ------------------------------------------------------------------ #
@@ -830,14 +836,19 @@ class PumpScanner:
             logger.info(f"📋 {sym} (resistance) → {verdict} (score={total:.1f}), не отправляем")
             return
 
-        await self._send_telegram(short_msg)
+        tg_ok = await self._send_telegram(short_msg)
 
         if not wait_mode:
             self.tracker.register_position(sym, current_price, candle_time, verdict=verdict, source="approach")
         if _TRADE_WEBHOOK_URL:
+            if not tg_ok:
+                logger.critical(f"⚠️ {sym}: ВХОД-сигнал (resistance) не дошёл в TG, но позиция откроется!")
+                asyncio.create_task(self._send_telegram(
+                    f"⚠️ {coin}/USDT — позиция открывается без уведомления (TG-сигнал не доставлен)"
+                ))
             asyncio.create_task(self._fire_trade_webhook(sym, current_price))
 
-    async def _send_telegram(self, text: str):
+    async def _send_telegram(self, text: str) -> bool:
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
         payload = {
             "chat_id": self.chat_id,
@@ -853,5 +864,8 @@ class PumpScanner:
                     if resp.status != 200:
                         body = await resp.text()
                         logger.error(f"Telegram error {resp.status}: {body}")
+                        return False
+                    return True
         except Exception as e:
             logger.error(f"Telegram send failed: {e}")
+            return False
