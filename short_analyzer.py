@@ -395,11 +395,12 @@ def format_short_analysis(
         and lvl_score >= 1.0   # fresh pump >10% in last hour
         and signal_per_day <= 2
     )
-    # RSI-override entry: extreme overbought on both timeframes, first signal only
-    # Mirrors competitor behaviour: enters without nearby level when RSI 1H≥85 + 4H≥75
+    # RSI-override entry: both timeframes overbought, first signal only, fresh pump
+    # Threshold 70/70: catches cases where level is beyond our 5% zone but RSI confirms reversal
+    # Protected by signal_per_day == 1 (no rocket coins) and lvl_score >= 1.0 (fresh pump >10%/1h)
     rsi_override_entry = (
-        rsi_1h is not None and rsi_1h >= 85
-        and rsi_4h is not None and rsi_4h >= 75
+        rsi_1h is not None and rsi_1h >= 70
+        and rsi_4h is not None and rsi_4h >= 70
         and signal_per_day == 1
         and lvl_score >= 1.0   # fresh pump >10% in last hour
     )
@@ -437,7 +438,7 @@ def format_short_analysis(
         v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень есть, но 4H не перекуплен (тренд не исчерпан)"
     elif no_level_block:
         if rsi_override_entry:
-            v_emoji, v_label = "🟢", "ВХОД — RSI перегрет на 1H+4H, разворот без уровня"
+            v_emoji, v_label = "🟢", "ВХОД — RSI перекуплен 1H+4H, свежий памп — разворот вероятен"
         else:
             v_emoji, v_label = "🟡", "СЛАБЫЙ — нет подтверждённого уровня (EMA / сопротивление)"
     else:
