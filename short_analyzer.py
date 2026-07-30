@@ -198,15 +198,17 @@ def _score_resistance(
 
 
 def _score_ema(ema_info: Optional[tuple]) -> tuple[Optional[str], Optional[str], float]:
-    """EMA above current price = dynamic resistance, only within SL distance (≤5%).
-    EMA beyond SL price is informational only — price hits SL before reaching the EMA.
+    """EMA above current price = dynamic resistance, only within SL distance.
+    4H EMA: ≤5% zone. 1D EMA: ≤6% zone — daily levels are stronger magnets and
+    price often reverses before fully reaching them.
     Very close EMA (<2%) gets score 1.5 — price reaches it immediately, higher confidence.
     """
     if ema_info is None:
         return None, None, 0.0
     ema, pct_above = ema_info[0], ema_info[1]
     label = ema_info[2] if len(ema_info) > 2 else "50 EMA 4H"
-    if pct_above < _SL_PCT:
+    effective_sl = 6.0 if "1D" in label else _SL_PCT
+    if pct_above < effective_sl:
         score = 1.5 if pct_above < 2.0 else 1.0
         return (
             f"Ключевая средняя {label}: {_fmt_price(ema)} (+{pct_above:.1f}%) — динамическое сопр.",
@@ -361,7 +363,9 @@ def format_short_analysis(
             return False  # borderline drop on low-liquidity coin → unreliable level
         return True
 
-    has_ema = ema_info is not None and ema_info[1] < _SL_PCT
+    _ema_label = ema_info[2] if (ema_info is not None and len(ema_info) > 2) else ""
+    _ema_sl = 6.0 if "1D" in _ema_label else _SL_PCT
+    has_ema = ema_info is not None and ema_info[1] < _ema_sl
     has_ema_very_close = ema_info is not None and ema_info[1] < 3.0  # EMA within 3% → lower RSI bar
 
     def _resistance_qualifies(info: Optional[tuple]) -> bool:
@@ -433,7 +437,10 @@ def format_short_analysis(
     elif cooldown_block:
         v_emoji, v_label = "🔴", f"ПРОПУСК — кулдаун 1ч после стопа, осталось ~{stop_cooldown_mins} мин"
     elif resistance_too_close:
-        v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень вплотную к цене (<0.5%), риск пробоя до СЛ"
+        if rsi_override_entry:
+            v_emoji, v_label = "🟢", "ВХОД — RSI перекуплен 1H+4H, свежий памп — разворот вероятен"
+        else:
+            v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень вплотную к цене (<0.5%), риск пробоя до СЛ"
     elif resistance_without_4h:
         v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень есть, но 4H не перекуплен (тренд не исчерпан)"
     elif no_level_block:
