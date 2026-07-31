@@ -91,6 +91,9 @@ class PumpScanner:
         self._last_vol: dict[str, float] = {}
         # Timestamp (ms) of last resistance-approach signal per symbol
         self._last_resistance_signal_ms: dict[str, int] = {}
+        # apiStateOpen cache: symbol → True/False, refreshed every hour
+        self._tradeable_cache: dict[str, bool] = {}
+        self._tradeable_cache_ts: float = 0.0
 
     # ------------------------------------------------------------------ #
     #  Main loop
@@ -374,13 +377,21 @@ class PumpScanner:
             self.tracker.register_position(symbol, close_p, candle_time, verdict=verdict, source="pump")
 
         if has_real_entry and _TRADE_WEBHOOK_URL:
-            if not tg_ok:
+            await self._ensure_tradeable_cache()
+            if not self._tradeable_cache.get(symbol, True):
                 coin = symbol.replace("-USDT", "")
-                logger.critical(f"⚠️ {symbol}: ВХОД-сигнал не дошёл в TG, но позиция откроется!")
+                logger.info(f"Skip webhook {symbol}: apiStateOpen=false (pre-market/closed)")
                 asyncio.create_task(self._send_telegram(
-                    f"⚠️ {coin}/USDT — позиция открывается без уведомления (TG-сигнал не доставлен)"
+                    f"⏸ {coin}/USDT — ВХОД не открыт: торги закрыты на BingX (пре-маркет)"
                 ))
-            asyncio.create_task(self._fire_trade_webhook(symbol, close_p))
+            else:
+                if not tg_ok:
+                    coin = symbol.replace("-USDT", "")
+                    logger.critical(f"⚠️ {symbol}: ВХОД-сигнал не дошёл в TG, но позиция откроется!")
+                    asyncio.create_task(self._send_telegram(
+                        f"⚠️ {coin}/USDT — позиция открывается без уведомления (TG-сигнал не доставлен)"
+                    ))
+                asyncio.create_task(self._fire_trade_webhook(symbol, close_p))
 
     # ------------------------------------------------------------------ #
     #  Helpers
@@ -663,6 +674,25 @@ class PumpScanner:
                 logger.debug(f"Executor cooldown query failed for {symbol}: {e}")
         return self.tracker.get_stops_today(symbol), self.tracker.get_stop_cooldown_mins(symbol)
 
+    async def _ensure_tradeable_cache(self):
+        """Refresh apiStateOpen cache from BingX contracts (at most once per hour)."""
+        if time.time() - self._tradeable_cache_ts < 3600:
+            return
+        try:
+            data = await self.api._get("/openApi/swap/v2/quote/contracts")
+            if data and isinstance(data, list):
+                self._tradeable_cache = {
+                    c["symbol"]: c.get("apiStateOpen") == "true"
+                    for c in data
+                    if isinstance(c, dict) and "symbol" in c
+                }
+                self._tradeable_cache_ts = time.time()
+                closed = [s for s, v in self._tradeable_cache.items() if not v]
+                if closed:
+                    logger.info(f"Tradeable cache: {len(closed)} symbols closed — {closed[:5]}")
+        except Exception as e:
+            logger.warning(f"Tradeable cache refresh failed: {e}")
+
     async def _fire_trade_webhook(self, symbol: str, price: float):
         payload = {"symbol": symbol, "price": price}
         headers = {"X-Secret": _TRADE_WEBHOOK_SECRET, "Content-Type": "application/json"}
@@ -841,12 +871,19 @@ class PumpScanner:
         if not wait_mode:
             self.tracker.register_position(sym, current_price, candle_time, verdict=verdict, source="approach")
         if _TRADE_WEBHOOK_URL:
-            if not tg_ok:
-                logger.critical(f"⚠️ {sym}: ВХОД-сигнал (resistance) не дошёл в TG, но позиция откроется!")
+            await self._ensure_tradeable_cache()
+            if not self._tradeable_cache.get(sym, True):
+                logger.info(f"Skip webhook {sym}: apiStateOpen=false (pre-market/closed)")
                 asyncio.create_task(self._send_telegram(
-                    f"⚠️ {coin}/USDT — позиция открывается без уведомления (TG-сигнал не доставлен)"
+                    f"⏸ {coin}/USDT — ВХОД не открыт: торги закрыты на BingX (пре-маркет)"
                 ))
-            asyncio.create_task(self._fire_trade_webhook(sym, current_price))
+            else:
+                if not tg_ok:
+                    logger.critical(f"⚠️ {sym}: ВХОД-сигнал (resistance) не дошёл в TG, но позиция откроется!")
+                    asyncio.create_task(self._send_telegram(
+                        f"⚠️ {coin}/USDT — позиция открывается без уведомления (TG-сигнал не доставлен)"
+                    ))
+                asyncio.create_task(self._fire_trade_webhook(sym, current_price))
 
     async def _send_telegram(self, text: str) -> bool:
         url = f"https://api.telegram.org/bot{self.telegram_token}/sendMessage"
