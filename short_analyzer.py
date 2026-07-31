@@ -383,6 +383,8 @@ def format_short_analysis(
     has_resistance = _is_strong(resistance_info) or _is_strong(resistance_1h_info)
     resistance_qualifies = _resistance_qualifies(resistance_info) or _resistance_qualifies(resistance_1h_info)
     has_real_resistance = has_ema or resistance_qualifies
+    # Any 1h level within SL range (even weak drop 10-14%) — minimum anchor for rsi_override
+    has_any_1h_res = resistance_1h_info is not None and resistance_1h_info[1] < _SL_PCT
     # Resistance present but too close to price (<0.5%) — overshoot risk, dedicated message
     resistance_too_close = (
         (resistance_info is not None and _is_strong(resistance_info) and resistance_info[1] < 0.5)
@@ -444,8 +446,10 @@ def format_short_analysis(
     elif resistance_without_4h:
         v_emoji, v_label = "🟡", "СЛАБЫЙ — уровень есть, но 4H не перекуплен (тренд не исчерпан)"
     elif no_level_block:
-        if rsi_override_entry:
-            v_emoji, v_label = "🟢", "ВХОД — RSI перекуплен 1H+4H, свежий памп — разворот вероятен"
+        if rsi_override_entry and has_any_1h_res:
+            v_emoji, v_label = "🟢", "ВХОД — RSI перекуплен 1H+4H, уровень 1h подтверждён"
+        elif rsi_override_entry:
+            v_emoji, v_label = "🟡", "СЛАБЫЙ — RSI перекуплен, но уровень не найден"
         else:
             v_emoji, v_label = "🟡", "СЛАБЫЙ — нет подтверждённого уровня (EMA / сопротивление)"
     else:
@@ -465,7 +469,8 @@ def format_short_analysis(
         msg_lines.append(f"{icon} {label}")
 
     hard_block = wait_mode or arb_block or cooldown_block
-    has_real_entry = not hard_block and (not no_level_block or rsi_override_entry) and (total >= entry_threshold or level_based_entry or rsi_override_entry)
+    _rsi_override_qualifies = rsi_override_entry and (not no_level_block or has_any_1h_res)
+    has_real_entry = not hard_block and (not no_level_block or _rsi_override_qualifies) and (total >= entry_threshold or level_based_entry or _rsi_override_qualifies)
     if has_real_entry:
         sl = current_price * 1.05
         tp = current_price * 0.95
