@@ -96,6 +96,9 @@ class PumpScanner:
 
         # Rolling price history: symbol -> deque of (timestamp_ms, price), oldest first
         self._price_history: dict[str, deque] = {}
+        # Candle open price: symbol -> (candle_ts_ms, open_price)
+        # First recorded price in each 30-min candle — matches competitor's reference method.
+        self._candle_opens: dict[str, tuple[int, float]] = {}
         # Timestamp (ms) of last signal sent per symbol (for dedup)
         self._last_signal_ms: dict[str, int] = {}
         # symbols present in the previous bulk ticker response (for dropout detection)
@@ -235,6 +238,15 @@ class PumpScanner:
             while hist and hist[0][0] < now_ms - ROLL_MAX_AGE_MS:
                 hist.popleft()
 
+            # Track candle open: first recorded price in each 30-min candle.
+            # Competitor uses candle open as ref, which captures gradual pre-pump moves
+            # better than rolling deque (our deque ref is already elevated for slow pumps).
+            candle_ts = current_candle_ts()
+            stored = self._candle_opens.get(sym)
+            if stored is None or stored[0] < candle_ts:
+                self._candle_opens[sym] = (candle_ts, last_price)
+            candle_open = self._candle_opens[sym][1]
+
             if vol < self.min_volume_usdt:
                 skipped_vol += 1
                 continue
@@ -254,7 +266,17 @@ class PumpScanner:
             if ref_price is None:
                 continue  # less than 30 min of history — skip
 
-            pct = (last_price - ref_price) / ref_price * 100
+            # Compute pump % by two methods; use whichever shows a larger move.
+            # Rolling window catches cross-boundary pumps (our strength).
+            # Candle open matches competitor — catches gradual within-candle pumps.
+            pct_rolling = (last_price - ref_price) / ref_price * 100
+            pct_candle = (last_price - candle_open) / candle_open * 100
+            if pct_candle > pct_rolling:
+                pct = pct_candle
+                ref_price = candle_open
+            else:
+                pct = pct_rolling
+
             if pct < self.min_pump_pct:
                 if pct >= 7.0:
                     logger.info(f"📊 Near-miss {sym}: +{pct:.1f}% (ref={ref_price:.6g}, last={last_price:.6g}, need {self.min_pump_pct}%)")
