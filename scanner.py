@@ -7,7 +7,6 @@ Architecture:
   - Enrichment (RSI/funding/ATH): fetched only when a signal fires.
 """
 import asyncio
-import datetime
 import logging
 import os
 import time
@@ -61,15 +60,6 @@ RESISTANCE_SCAN_BATCH     = 15           # max candidates per cycle
 _NON_CRYPTO_PREFIXES = ("NCSK", "NCFX", "NCSI", "NCCO")
 
 
-def _is_premarket_session(symbol: str) -> bool:
-    """True if symbol is a non-crypto synthetic AND current UTC time is US pre-market (08:00–13:30, Mon–Fri)."""
-    if not symbol.startswith(_NON_CRYPTO_PREFIXES):
-        return False
-    now = datetime.datetime.utcnow()
-    if now.weekday() >= 5:  # Sat=5, Sun=6 — no pre-market on weekends
-        return False
-    t = now.time()
-    return datetime.time(8, 0) <= t < datetime.time(13, 30)
 
 
 def current_candle_ts() -> int:
@@ -289,8 +279,7 @@ class PumpScanner:
                 logger.info(f"⏭️ {sym} +{pct:.1f}% — cooldown {remaining}s remaining")
                 continue
 
-            if _is_premarket_session(sym):
-                logger.info(f"⏸ {sym} +{pct:.1f}% — пре-маркет US (08:00–13:30 UTC), пропуск")
+            if sym.startswith(_NON_CRYPTO_PREFIXES):
                 continue
 
             candidates.append((sym, pct, ref_price, last_price, vol, price_60min_ago))
@@ -759,7 +748,7 @@ class PumpScanner:
             if not (RESISTANCE_MOVE_MIN_PCT <= move_30m < self.min_pump_pct):
                 continue
 
-            if _is_premarket_session(sym):
+            if sym.startswith(_NON_CRYPTO_PREFIXES):
                 continue
 
             candidates.append((sym, current_price, move_30m))
